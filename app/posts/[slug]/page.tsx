@@ -1,4 +1,4 @@
-import { getPostBySlug, getAllPublishedPosts } from "@/lib/db";
+import { getPostBySlug } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { formatDate } from "@/lib/utils";
 import CategoryBadge from "@/components/CategoryBadge";
@@ -22,11 +22,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
             images: post.cover_image ? [post.cover_image] : [],
         },
     };
-}
-
-export async function generateStaticParams() {
-    const posts = await getAllPublishedPosts();
-    return posts.map((p) => ({ slug: p.slug }));
 }
 
 export const dynamic = "force-dynamic";

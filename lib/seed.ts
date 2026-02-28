@@ -1,41 +1,11 @@
-import Database from "better-sqlite3";
-import path from "path";
-import fs from "fs";
+import { initDb, createPost } from "./db";
 
-const DB_DIR = path.join(process.cwd(), "data");
-const DB_PATH = path.join(DB_DIR, "mochi.db");
+async function seed() {
+  console.log("⏳ Initialising schema…");
+  await initDb();
+  console.log("✓ Schema ready");
 
-if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
-}
-
-const db = new Database(DB_PATH);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS posts (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    title       TEXT NOT NULL,
-    slug        TEXT NOT NULL UNIQUE,
-    excerpt     TEXT,
-    content     TEXT NOT NULL DEFAULT '',
-    category    TEXT NOT NULL CHECK(category IN ('game','book','tv','movie','music')),
-    cover_image TEXT DEFAULT '',
-    score       REAL NOT NULL DEFAULT 0 CHECK(score >= 0 AND score <= 10),
-    status      TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published')),
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-`);
-
-const existing = db.prepare("SELECT id FROM posts WHERE slug = ?").get("the-miroku-murder-case");
-if (existing) {
-    console.log("⚠️  Seed post already exists. Skipping.");
-    process.exit(0);
-}
-
-const content = `
+  const content = `
 <h2>A Labyrinthine Mystery in the Fog of Kyoto</h2>
 <p>There are detective novels that merely entertain, and then there are those that quietly burrow under your skin and refuse to leave. <em>The Miroku Murder Case</em> by the fictional novelist Etsuko Narimura belongs firmly in the latter category. I picked this one up on a whim from a second-hand shelf in Jimbocho, expecting a pleasant rainy-afternoon read. What I got was four sleepless nights and a profound new appreciation for the architecture of the Japanese mystery genre.</p>
 
@@ -56,21 +26,34 @@ const content = `
 <h2>The Verdict</h2>
 <p><em>The Miroku Murder Case</em> is a richly constructed, atmospherically dense locked-room mystery that earns its final revelation through patience and intellectual rigor. It is not a light or breezy read — it asks something of you. But what it gives back is the rare satisfaction of a story where everything, in the end, makes complete and inevitable sense.</p>
 <p>Highly recommended for fans of Seishi Yokomizo, Soji Shimada, and anyone who believes that the best mysteries are, at their core, stories about the weight of the past on the living.</p>
-`;
+`.trim();
 
-db.prepare(`
-  INSERT INTO posts (title, slug, excerpt, content, category, cover_image, score, status, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '-3 days'), datetime('now', '-3 days'))
-`).run(
-    "The Miroku Murder Case",
-    "the-miroku-murder-case",
-    "A locked-room mystery set in a Kyoto temple that manages to be both intellectually rigorous and deeply atmospheric. Detective Tsuruga Haruki investigates the impossible death of a Buddhist art restorer found beneath the Future Buddha himself.",
-    content.trim(),
-    "book",
-    "https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=800&q=80",
-    8.5,
-    "published"
-);
+  // Check if already seeded
+  const { neon } = await import("@neondatabase/serverless");
+  const sql = neon(process.env.DATABASE_URL!);
+  const existing = await sql`SELECT id FROM posts WHERE slug = 'the-miroku-murder-case'`;
+  if (existing.length > 0) {
+    console.log("⚠️  Seed post already exists. Skipping.");
+    return;
+  }
 
-console.log("✅ Seeded successfully: 'The Miroku Murder Case'");
-db.close();
+  await createPost({
+    title: "The Miroku Murder Case",
+    slug: "the-miroku-murder-case",
+    excerpt:
+      "A locked-room mystery set in a Kyoto temple that manages to be both intellectually rigorous and deeply atmospheric. Detective Tsuruga Haruki investigates the impossible death of a Buddhist art restorer found beneath the Future Buddha himself.",
+    content,
+    category: "book",
+    cover_image:
+      "https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=800&q=80",
+    score: 8.5,
+    status: "published",
+  });
+
+  console.log("✅ Seeded successfully: 'The Miroku Murder Case'");
+}
+
+seed().catch((err) => {
+  console.error("Seed failed:", err);
+  process.exit(1);
+});

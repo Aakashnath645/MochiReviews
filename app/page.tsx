@@ -4,8 +4,8 @@ import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default function HomePage() {
-  const posts = getAllPublishedPosts();
+export default async function HomePage() {
+  const posts = await getAllPublishedPosts();
   const featured = posts[0];
   const rest = posts.slice(1);
 

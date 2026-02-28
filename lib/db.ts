@@ -1,74 +1,10 @@
-import Database from "better-sqlite3";
-import path from "path";
-import fs from "fs";
+import { neon } from "@neondatabase/serverless";
 
-const DB_DIR = path.join(process.cwd(), "data");
-const DB_PATH = path.join(DB_DIR, "mochi.db");
-
-// Ensure data directory exists
-if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
-}
-
-let _db: Database.Database | null = null;
-
-function getDb(): Database.Database {
-    if (!_db) {
-        _db = new Database(DB_PATH);
-        _db.pragma("journal_mode = WAL");
-        _db.pragma("foreign_keys = ON");
-        initializeSchema(_db);
+function getDb() {
+    if (!process.env.DATABASE_URL) {
+        throw new Error("DATABASE_URL environment variable is not set.");
     }
-    return _db;
-}
-
-function initializeSchema(db: Database.Database): void {
-    // Check whether the posts table already exists
-    const tableInfo = db
-        .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='posts'")
-        .get() as { sql: string } | undefined;
-
-    if (!tableInfo) {
-        // Fresh install — create without a hardcoded category restriction
-        db.exec(`
-      CREATE TABLE posts (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        title       TEXT NOT NULL,
-        slug        TEXT NOT NULL UNIQUE,
-        excerpt     TEXT,
-        content     TEXT NOT NULL DEFAULT '',
-        category    TEXT NOT NULL,
-        cover_image TEXT DEFAULT '',
-        score       REAL NOT NULL DEFAULT 0 CHECK(score >= 0 AND score <= 10),
-        status      TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published')),
-        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-    `);
-    } else if (tableInfo.sql.includes("category IN (")) {
-        // Migration: recreate table without the old hardcoded category CHECK constraint
-        db.exec(`
-      BEGIN TRANSACTION;
-      CREATE TABLE posts_new (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        title       TEXT NOT NULL,
-        slug        TEXT NOT NULL UNIQUE,
-        excerpt     TEXT,
-        content     TEXT NOT NULL DEFAULT '',
-        category    TEXT NOT NULL,
-        cover_image TEXT DEFAULT '',
-        score       REAL NOT NULL DEFAULT 0 CHECK(score >= 0 AND score <= 10),
-        status      TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published')),
-        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-      INSERT INTO posts_new SELECT * FROM posts;
-      DROP TABLE posts;
-      ALTER TABLE posts_new RENAME TO posts;
-      COMMIT;
-    `);
-    }
-    // else: table already exists without the old constraint — nothing to do
+    return neon(process.env.DATABASE_URL);
 }
 
 export type Post = {
@@ -77,7 +13,7 @@ export type Post = {
     slug: string;
     excerpt: string | null;
     content: string;
-    category: string; // any string — primary or custom
+    category: string;
     cover_image: string | null;
     score: number;
     status: "draft" | "published";
@@ -87,98 +23,135 @@ export type Post = {
 
 export type PostInput = Omit<Post, "id" | "created_at" | "updated_at">;
 
-// --- Public queries ---
+// ── Schema ────────────────────────────────────────────────────────────────────
 
-export function getAllPublishedPosts(category?: string): Post[] {
-    const db = getDb();
+export async function initDb(): Promise<void> {
+    const sql = getDb();
+    await sql`
+    CREATE TABLE IF NOT EXISTS posts (
+      id          SERIAL PRIMARY KEY,
+      title       TEXT NOT NULL,
+      slug        TEXT NOT NULL UNIQUE,
+      excerpt     TEXT,
+      content     TEXT NOT NULL DEFAULT '',
+      category    TEXT NOT NULL,
+      cover_image TEXT DEFAULT '',
+      score       FLOAT NOT NULL DEFAULT 0 CHECK (score >= 0 AND score <= 10),
+      status      TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+}
+
+// ── Public queries ────────────────────────────────────────────────────────────
+
+export async function getAllPublishedPosts(category?: string): Promise<Post[]> {
+    const sql = getDb();
     if (category) {
-        return db
-            .prepare(
-                "SELECT * FROM posts WHERE status = 'published' AND category = ? ORDER BY created_at DESC"
-            )
-            .all(category) as Post[];
+        return (await sql`
+      SELECT * FROM posts
+      WHERE status = 'published' AND category = ${category}
+      ORDER BY created_at DESC
+    `) as Post[];
     }
-    return db
-        .prepare(
-            "SELECT * FROM posts WHERE status = 'published' ORDER BY created_at DESC"
-        )
-        .all() as Post[];
+    return (await sql`
+    SELECT * FROM posts
+    WHERE status = 'published'
+    ORDER BY created_at DESC
+  `) as Post[];
 }
 
-export function getPostBySlug(slug: string): Post | undefined {
-    const db = getDb();
-    return db
-        .prepare("SELECT * FROM posts WHERE slug = ? AND status = 'published'")
-        .get(slug) as Post | undefined;
+export async function getPostBySlug(slug: string): Promise<Post | undefined> {
+    const sql = getDb();
+    const rows = await sql`
+    SELECT * FROM posts WHERE slug = ${slug} AND status = 'published'
+  `;
+    return rows[0] as Post | undefined;
 }
 
-// --- Admin queries ---
+// ── Admin queries ─────────────────────────────────────────────────────────────
 
-export function getAllPosts(): Post[] {
-    const db = getDb();
-    return db
-        .prepare("SELECT * FROM posts ORDER BY created_at DESC")
-        .all() as Post[];
+export async function getAllPosts(): Promise<Post[]> {
+    const sql = getDb();
+    return (await sql`
+    SELECT * FROM posts ORDER BY created_at DESC
+  `) as Post[];
 }
 
-export function getPostById(id: number): Post | undefined {
-    const db = getDb();
-    return db
-        .prepare("SELECT * FROM posts WHERE id = ?")
-        .get(id) as Post | undefined;
+export async function getPostById(id: number): Promise<Post | undefined> {
+    const sql = getDb();
+    const rows = await sql`SELECT * FROM posts WHERE id = ${id}`;
+    return rows[0] as Post | undefined;
 }
 
-export function createPost(data: PostInput): Post {
-    const db = getDb();
-    const result = db
-        .prepare(
-            `INSERT INTO posts (title, slug, excerpt, content, category, cover_image, score, status)
-       VALUES (@title, @slug, @excerpt, @content, @category, @cover_image, @score, @status)`
-        )
-        .run(data);
-    return getPostById(result.lastInsertRowid as number)!;
+export async function createPost(data: PostInput): Promise<Post> {
+    const sql = getDb();
+    const rows = await sql`
+    INSERT INTO posts (title, slug, excerpt, content, category, cover_image, score, status)
+    VALUES (
+      ${data.title}, ${data.slug}, ${data.excerpt ?? null}, ${data.content},
+      ${data.category}, ${data.cover_image ?? null}, ${data.score}, ${data.status}
+    )
+    RETURNING *
+  `;
+    return rows[0] as Post;
 }
 
-export function updatePost(id: number, data: Partial<PostInput>): Post {
-    const db = getDb();
-    const existing = getPostById(id);
+export async function updatePost(id: number, data: Partial<PostInput>): Promise<Post> {
+    const existing = await getPostById(id);
     if (!existing) throw new Error(`Post ${id} not found`);
 
-    const merged = { ...existing, ...data };
-    db.prepare(
-        `UPDATE posts SET
-      title = @title, slug = @slug, excerpt = @excerpt, content = @content,
-      category = @category, cover_image = @cover_image, score = @score,
-      status = @status, updated_at = datetime('now')
-     WHERE id = @id`
-    ).run({ ...merged, id });
+    const merged: PostInput = {
+        title: data.title ?? existing.title,
+        slug: data.slug ?? existing.slug,
+        excerpt: data.excerpt !== undefined ? data.excerpt : existing.excerpt,
+        content: data.content ?? existing.content,
+        category: data.category ?? existing.category,
+        cover_image: data.cover_image !== undefined ? data.cover_image : existing.cover_image,
+        score: data.score ?? existing.score,
+        status: data.status ?? existing.status,
+    };
 
-    return getPostById(id)!;
+    const sql = getDb();
+    const rows = await sql`
+    UPDATE posts SET
+      title       = ${merged.title},
+      slug        = ${merged.slug},
+      excerpt     = ${merged.excerpt ?? null},
+      content     = ${merged.content},
+      category    = ${merged.category},
+      cover_image = ${merged.cover_image ?? null},
+      score       = ${merged.score},
+      status      = ${merged.status},
+      updated_at  = NOW()
+    WHERE id = ${id}
+    RETURNING *
+  `;
+    return rows[0] as Post;
 }
 
-export function deletePost(id: number): void {
-    const db = getDb();
-    db.prepare("DELETE FROM posts WHERE id = ?").run(id);
+export async function deletePost(id: number): Promise<void> {
+    const sql = getDb();
+    await sql`DELETE FROM posts WHERE id = ${id}`;
 }
 
-export function slugExists(slug: string, excludeId?: number): boolean {
-    const db = getDb();
+export async function slugExists(slug: string, excludeId?: number): Promise<boolean> {
+    const sql = getDb();
     if (excludeId) {
-        return !!db
-            .prepare("SELECT 1 FROM posts WHERE slug = ? AND id != ?")
-            .get(slug, excludeId);
+        const rows = await sql`
+      SELECT 1 FROM posts WHERE slug = ${slug} AND id != ${excludeId}
+    `;
+        return rows.length > 0;
     }
-    return !!db.prepare("SELECT 1 FROM posts WHERE slug = ?").get(slug);
+    const rows = await sql`SELECT 1 FROM posts WHERE slug = ${slug}`;
+    return rows.length > 0;
 }
 
-/** Returns all distinct categories that have at least one published post */
-export function getAllCategories(): string[] {
-    const db = getDb();
-    return (
-        db
-            .prepare(
-                "SELECT DISTINCT category FROM posts WHERE status = 'published' ORDER BY category"
-            )
-            .all() as { category: string }[]
-    ).map((r) => r.category);
+export async function getAllCategories(): Promise<string[]> {
+    const sql = getDb();
+    const rows = await sql`
+    SELECT DISTINCT category FROM posts WHERE status = 'published' ORDER BY category
+  `;
+    return rows.map((r) => r.category as string);
 }

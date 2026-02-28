@@ -8,7 +8,7 @@ export async function GET(
 ) {
     const { id } = await params;
     try {
-        const post = getPostById(Number(id));
+        const post = await getPostById(Number(id));
         if (!post) return NextResponse.json({ error: "Not found" }, { status: 404 });
         return NextResponse.json(post);
     } catch (error) {
@@ -27,7 +27,7 @@ export async function PUT(
         const { title, slug, excerpt, content, category, cover_image, score, status } = body;
 
         const finalSlug = slug || slugify(title);
-        const post = updatePost(Number(id), {
+        const post = await updatePost(Number(id), {
             title,
             slug: finalSlug,
             excerpt: excerpt || null,
@@ -41,7 +41,7 @@ export async function PUT(
         return NextResponse.json(post);
     } catch (error: unknown) {
         console.error(error);
-        if (error instanceof Error && error.message.includes("UNIQUE")) {
+        if (error instanceof Error && error.message.includes("unique")) {
             return NextResponse.json({ error: "Slug already exists" }, { status: 409 });
         }
         return NextResponse.json({ error: "Failed to update post" }, { status: 500 });
@@ -54,7 +54,7 @@ export async function DELETE(
 ) {
     const { id } = await params;
     try {
-        deletePost(Number(id));
+        await deletePost(Number(id));
         return NextResponse.json({ success: true });
     } catch (error) {
         console.error(error);

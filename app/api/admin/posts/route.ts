@@ -4,7 +4,7 @@ import { slugify } from "@/lib/utils";
 
 export async function GET() {
     try {
-        const posts = getAllPosts();
+        const posts = await getAllPosts();
         return NextResponse.json(posts);
     } catch (error) {
         console.error(error);
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
         }
 
         const finalSlug = slug || slugify(title);
-        const post = createPost({
+        const post = await createPost({
             title,
             slug: finalSlug,
             excerpt: excerpt || null,
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(post, { status: 201 });
     } catch (error: unknown) {
         console.error(error);
-        if (error instanceof Error && error.message.includes("UNIQUE")) {
+        if (error instanceof Error && error.message.includes("unique")) {
             return NextResponse.json({ error: "Slug already exists" }, { status: 409 });
         }
         return NextResponse.json({ error: "Failed to create post" }, { status: 500 });

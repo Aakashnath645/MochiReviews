@@ -7,7 +7,7 @@ type Props = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const { id } = await params;
-    const post = getPostById(Number(id));
+    const post = await getPostById(Number(id));
     return { title: post ? `Edit: ${post.title} — Admin` : "Edit Post — Admin" };
 }
 
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 export default async function EditPostPage({ params }: Props) {
     const { id } = await params;
-    const post = getPostById(Number(id));
+    const post = await getPostById(Number(id));
     if (!post) notFound();
 
     return (

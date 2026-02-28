@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get("category") || undefined;
 
     try {
-        const posts = getAllPublishedPosts(category);
+        const posts = await getAllPublishedPosts(category);
         return NextResponse.json(posts);
     } catch (error) {
         console.error(error);

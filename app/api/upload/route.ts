@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import path from "path";
-import fs from "fs";
+import { put } from "@vercel/blob";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"];
 const MAX_SIZE_MB = 8;
@@ -28,21 +27,12 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const bytes = await file.arrayBuffer();
-        const buffer = Buffer.from(bytes);
+        const blob = await put(file.name, file, {
+            access: "public",
+            addRandomSuffix: true,
+        });
 
-        // Build a safe, unique filename
-        const ext = path.extname(file.name).toLowerCase() || ".jpg";
-        const safeName = `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
-
-        const uploadDir = path.join(process.cwd(), "public", "uploads");
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-
-        fs.writeFileSync(path.join(uploadDir, safeName), buffer);
-
-        return NextResponse.json({ url: `/uploads/${safeName}` });
+        return NextResponse.json({ url: blob.url });
     } catch (err) {
         console.error("Upload error:", err);
         return NextResponse.json({ error: "Upload failed" }, { status: 500 });

@@ -40,6 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# MochiReviews runtime files
-/data/
+# MochiReviews runtime files (local dev only)
 /public/uploads/
